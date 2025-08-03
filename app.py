@@ -57,101 +57,169 @@ def summarize():
         return jsonify({'success': False, 'error': str(e)})
 
 def get_youtube_transcript(video_id):
-    """YouTube transcript alma fonksiyonu - geliştirilmiş"""
+    """YouTube transcript alma - çoklu yöntem"""
     print(f"📝 Video ID {video_id} için transcript alınıyor...")
     
-    # Önce youtube-transcript-api ile dene (daha agresif)
+    # Yöntem 1: youtube-dl (yt-dlp'den daha eski ve kararlı)
+    transcript = try_youtube_dl(video_id)
+    if transcript and len(transcript) > 100:
+        return transcript
+    
+    # Yöntem 2: Direct YouTube API request
+    transcript = try_direct_youtube_api(video_id)
+    if transcript and len(transcript) > 100:
+        return transcript
+    
+    # Yöntem 3: Web scraping
+    transcript = try_web_scraping(video_id)
+    if transcript and len(transcript) > 100:
+        return transcript
+    
+    # Yöntem 4: youtube-transcript-api (en son)
+    transcript = try_transcript_api(video_id)
+    if transcript and len(transcript) > 100:
+        return transcript
+    
+    # Yöntem 5: yt-dlp (son çare)
+    transcript = try_ytdlp_transcript(video_id)
+    if transcript and len(transcript) > 100:
+        return transcript
+    
+    print("❌ Hiçbir yöntemle transcript alınamadı")
+    return None
+
+def try_youtube_dl(video_id):
+    """youtube-dl ile dene"""
     try:
+        print("🔄 youtube-dl deneniyor...")
+        
+        cmd = [
+            'youtube-dl',
+            '--write-auto-sub',
+            '--sub-lang', 'tr,en',
+            '--skip-download',
+            '--sub-format', 'vtt',
+            '-o', f'temp_%(id)s.%(ext)s',
+            f'https://www.youtube.com/watch?v={video_id}'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode == 0:
+            import glob
+            vtt_files = glob.glob(f'temp_{video_id}*.vtt')
+            
+            if vtt_files:
+                with open(vtt_files[0], 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                transcript = parse_vtt(content)
+                
+                # Cleanup
+                for file in vtt_files:
+                    try:
+                        os.remove(file)
+                    except:
+                        pass
+                
+                print("✅ youtube-dl ile başarılı!")
+                return transcript
+                
+    except Exception as e:
+        print(f"⚠️ youtube-dl hatası: {e}")
+    
+    return None
+
+def try_direct_youtube_api(video_id):
+    """Direkt YouTube API isteği"""
+    try:
+        print("🔄 Direct YouTube API deneniyor...")
+        
+        # YouTube'un internal API'sine istek
+        urls_to_try = [
+            f"https://www.youtube.com/api/timedtext?lang=tr&v={video_id}&fmt=vtt",
+            f"https://www.youtube.com/api/timedtext?lang=en&v={video_id}&fmt=vtt",
+            f"https://www.youtube.com/api/timedtext?lang=tr&v={video_id}&kind=asr&fmt=vtt",
+            f"https://www.youtube.com/api/timedtext?lang=en&v={video_id}&kind=asr&fmt=vtt"
+        ]
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        for url in urls_to_try:
+            try:
+                response = requests.get(url, headers=headers, timeout=15)
+                if response.status_code == 200 and len(response.text) > 100:
+                    transcript = parse_vtt(response.text)
+                    if transcript:
+                        print("✅ Direct API ile başarılı!")
+                        return transcript
+            except:
+                continue
+                
+    except Exception as e:
+        print(f"⚠️ Direct API hatası: {e}")
+    
+    return None
+
+def try_web_scraping(video_id):
+    """Web scraping ile transcript alma"""
+    try:
+        print("🔄 Web scraping deneniyor...")
+        
+        # YouTube watch sayfasını al
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=20)
+        
+        if response.status_code == 200:
+            html = response.text
+            
+            # Caption track URL'lerini ara
+            import re
+            
+            # Captions player response'u ara
+            pattern = r'"captions":\s*({[^}]+})'
+            captions_match = re.search(pattern, html)
+            
+            if captions_match:
+                print("📋 Caption bilgisi bulundu, parse ediliyor...")
+                # Basit parsing - daha gelişmiş yapılabilir
+                
+            # Alternatif: Script tag'lerinde ara
+            script_pattern = r'"captionTracks":\s*(\[[^\]]+\])'
+            script_match = re.search(script_pattern, html)
+            
+            if script_match:
+                print("📋 Script caption tracks bulundu")
+                
+        print("⚠️ Web scraping ile transcript bulunamadı")
+        
+    except Exception as e:
+        print(f"⚠️ Web scraping hatası: {e}")
+    
+    return None
+
+def try_transcript_api(video_id):
+    """youtube-transcript-api ile dene"""
+    try:
+        print("🔄 youtube-transcript-api deneniyor...")
         from youtube_transcript_api import YouTubeTranscriptApi
         
-        print("🔄 YouTube Transcript API deneniyor...")
+        # Basit approach
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        text = ' '.join([item['text'] for item in transcript])
+        print("✅ transcript-api ile başarılı!")
+        return text
         
-        # Mevcut transcript'leri listele
-        try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            
-            # Önce manuel transcriptleri bul
-            manual_transcripts = []
-            auto_transcripts = []
-            
-            for transcript in transcript_list:
-                if transcript.is_generated:
-                    auto_transcripts.append(transcript)
-                else:
-                    manual_transcripts.append(transcript)
-            
-            print(f"📋 {len(manual_transcripts)} manuel, {len(auto_transcripts)} otomatik transcript bulundu")
-            
-            # Önce manuel transcriptleri dene
-            for transcript in manual_transcripts:
-                try:
-                    data = transcript.fetch()
-                    text = ' '.join([item['text'] for item in data])
-                    if len(text) > 100:
-                        print(f"✅ Manuel {transcript.language_code} transcript alındı!")
-                        return text
-                except:
-                    continue
-            
-            # Sonra otomatik transcriptleri dene
-            for transcript in auto_transcripts:
-                try:
-                    data = transcript.fetch()
-                    text = ' '.join([item['text'] for item in data])
-                    if len(text) > 100:
-                        print(f"✅ Otomatik {transcript.language_code} transcript alındı!")
-                        return text
-                except:
-                    continue
-                    
-        except Exception as list_error:
-            print(f"⚠️ Transcript listesi hatası: {list_error}")
-            
-            # Direkt dil kodlarıyla dene
-            language_codes = ['tr', 'en', 'auto']
-            for lang in language_codes:
-                try:
-                    if lang == 'auto':
-                        transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
-                    else:
-                        transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
-                    
-                    text = ' '.join([item['text'] for item in transcript_data])
-                    if len(text) > 100:
-                        print(f"✅ {lang} transcript direkt alındı!")
-                        return text
-                except Exception as lang_error:
-                    print(f"⚠️ {lang} dili hatası: {lang_error}")
-                    continue
-                    
-    except ImportError:
-        print("❌ youtube-transcript-api kütüphanesi yok")
-    except Exception as api_error:
-        print(f"❌ youtube-transcript-api genel hatası: {api_error}")
+    except Exception as e:
+        print(f"⚠️ transcript-api hatası: {e}")
     
-    # yt-dlp dene
-    try:
-        print("🔄 yt-dlp deneniyor...")
-        return try_ytdlp_transcript(video_id)
-    except Exception as ytdlp_error:
-        print(f"❌ yt-dlp hatası: {ytdlp_error}")
-    
-    # YouTube Data API ile video detaylarını dene
-    try:
-        print("🔄 Video detayları alınıyor...")
-        return get_video_description(video_id)
-    except Exception as desc_error:
-        print(f"❌ Video detay hatası: {desc_error}")
-    
-    # Son çare mesajı
-    return f"""Bu video (ID: {video_id}) için transcript alınamadı. 
-
-Olası nedenler:
-- Video altyazısı yok
-- Video özel/kısıtlı
-- Geçici API sorunu
-
-Lütfen altyazılı bir video deneyin veya video sahibinden altyazı eklemesini isteyin."""
+    return None
 
 def try_ytdlp_transcript(video_id):
     """yt-dlp ile transcript alma"""
