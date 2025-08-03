@@ -47,13 +47,22 @@ def extract_video_id(url):
     match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
     return match.group(1) if match else None
 
+from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
+
 def get_transcript(video_id):
     try:
+        print(f"📡 Transcript alınmaya çalışılıyor: {video_id}")
         transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['tr', 'en'])
+        print("✅ Transcript başarıyla alındı.")
         return ' '.join([item['text'] for item in transcript])
+    except TranscriptsDisabled:
+        print("❌ Bu video için altyazılar devre dışı.")
+    except NoTranscriptFound:
+        print("❌ Altyazı bulunamadı.")
     except Exception as e:
-        print(f"Transcript alınamadı: {e}")
-        return None
+        print(f"🚨 Genel transcript hatası: {e}")
+    return None
+
 
 def get_video_info(video_id):
     try:
