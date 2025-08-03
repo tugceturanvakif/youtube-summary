@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify, send_from_directory
 app = Flask(__name__)
 
 # Environment variable'dan API key al
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyCC26sECnkOcgEpXd8ZuAsTGVU_0xpQ8ow')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 @app.route('/')
 def index():
