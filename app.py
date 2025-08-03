@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 
-# Environment variable'dan API key al
+# Environment variable'dan API key al - fallback yok!
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 @app.route('/')
@@ -151,8 +151,8 @@ def gemini_ozet_yap(transcript):
     """Google Gemini ile özet yap"""
     print("🤖 Gemini API'ye istek gönderiliyor...")
     
-    if not GEMINI_API_KEY or GEMINI_API_KEY == "your-api-key":
-        return "⚠️ Gemini API key gerekli!"
+    if not GEMINI_API_KEY:
+        return "⚠️ Gemini API key bulunamadı! Railway'de environment variable olarak ekleyin."
     
     # Transcript'i kısalt
     if len(transcript) > 15000:
@@ -215,5 +215,6 @@ def after_request(response):
     return response
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Render için port ayarı
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)

@@ -2,3 +2,4 @@ flask
 requests
 yt-dlp
 youtube-transcript-api
+gunicorn
