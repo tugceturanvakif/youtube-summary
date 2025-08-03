@@ -57,30 +57,130 @@ def summarize():
         return jsonify({'success': False, 'error': str(e)})
 
 def get_youtube_transcript(video_id):
-    """YouTube transcript alma fonksiyonu - yt-dlp odaklı"""
-    print("📝 YouTube transcript alınıyor...")
+    """YouTube transcript alma fonksiyonu - geliştirilmiş"""
+    print(f"📝 Video ID {video_id} için transcript alınıyor...")
     
-    # Direkt yt-dlp ile başla (daha güvenilir)
+    # Önce youtube-transcript-api ile dene (daha agresif)
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        
+        print("🔄 YouTube Transcript API deneniyor...")
+        
+        # Mevcut transcript'leri listele
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            
+            # Önce manuel transcriptleri bul
+            manual_transcripts = []
+            auto_transcripts = []
+            
+            for transcript in transcript_list:
+                if transcript.is_generated:
+                    auto_transcripts.append(transcript)
+                else:
+                    manual_transcripts.append(transcript)
+            
+            print(f"📋 {len(manual_transcripts)} manuel, {len(auto_transcripts)} otomatik transcript bulundu")
+            
+            # Önce manuel transcriptleri dene
+            for transcript in manual_transcripts:
+                try:
+                    data = transcript.fetch()
+                    text = ' '.join([item['text'] for item in data])
+                    if len(text) > 100:
+                        print(f"✅ Manuel {transcript.language_code} transcript alındı!")
+                        return text
+                except:
+                    continue
+            
+            # Sonra otomatik transcriptleri dene
+            for transcript in auto_transcripts:
+                try:
+                    data = transcript.fetch()
+                    text = ' '.join([item['text'] for item in data])
+                    if len(text) > 100:
+                        print(f"✅ Otomatik {transcript.language_code} transcript alındı!")
+                        return text
+                except:
+                    continue
+                    
+        except Exception as list_error:
+            print(f"⚠️ Transcript listesi hatası: {list_error}")
+            
+            # Direkt dil kodlarıyla dene
+            language_codes = ['tr', 'en', 'auto']
+            for lang in language_codes:
+                try:
+                    if lang == 'auto':
+                        transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
+                    else:
+                        transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
+                    
+                    text = ' '.join([item['text'] for item in transcript_data])
+                    if len(text) > 100:
+                        print(f"✅ {lang} transcript direkt alındı!")
+                        return text
+                except Exception as lang_error:
+                    print(f"⚠️ {lang} dili hatası: {lang_error}")
+                    continue
+                    
+    except ImportError:
+        print("❌ youtube-transcript-api kütüphanesi yok")
+    except Exception as api_error:
+        print(f"❌ youtube-transcript-api genel hatası: {api_error}")
+    
+    # yt-dlp dene
+    try:
+        print("🔄 yt-dlp deneniyor...")
+        return try_ytdlp_transcript(video_id)
+    except Exception as ytdlp_error:
+        print(f"❌ yt-dlp hatası: {ytdlp_error}")
+    
+    # YouTube Data API ile video detaylarını dene
+    try:
+        print("🔄 Video detayları alınıyor...")
+        return get_video_description(video_id)
+    except Exception as desc_error:
+        print(f"❌ Video detay hatası: {desc_error}")
+    
+    # Son çare mesajı
+    return f"""Bu video (ID: {video_id}) için transcript alınamadı. 
+
+Olası nedenler:
+- Video altyazısı yok
+- Video özel/kısıtlı
+- Geçici API sorunu
+
+Lütfen altyazılı bir video deneyin veya video sahibinden altyazı eklemesini isteyin."""
+
+def try_ytdlp_transcript(video_id):
+    """yt-dlp ile transcript alma"""
     try:
         print("🔄 yt-dlp ile transcript alınıyor...")
         
+        # Daha detaylı yt-dlp komutu
         cmd = [
             'yt-dlp',
             '--write-auto-sub',
-            '--sub-lang', 'tr,en',
+            '--write-sub',
+            '--sub-lang', 'tr,en,tr-auto,en-auto',
             '--skip-download',
             '--sub-format', 'vtt',
             '--output', f'temp_%(id)s.%(ext)s',
+            '--no-warnings',
             f'https://www.youtube.com/watch?v={video_id}'
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        print(f"yt-dlp return code: {result.returncode}")
         
         if result.returncode == 0:
             import glob
             vtt_files = glob.glob(f'temp_{video_id}*.vtt')
+            print(f"Bulunan VTT dosyaları: {vtt_files}")
             
             if vtt_files:
+                # İlk dosyayı al
                 vtt_file = vtt_files[0]
                 with open(vtt_file, 'r', encoding='utf-8') as f:
                     vtt_content = f.read()
@@ -94,16 +194,48 @@ def get_youtube_transcript(video_id):
                     except:
                         pass
                 
-                print("✅ yt-dlp ile transcript alındı!")
-                return transcript
+                if len(transcript) > 100:
+                    print("✅ yt-dlp ile transcript alındı!")
+                    return transcript
+                else:
+                    print("⚠️ yt-dlp transcript çok kısa")
         else:
             print(f"⚠️ yt-dlp stderr: {result.stderr}")
+            print(f"⚠️ yt-dlp stdout: {result.stdout}")
         
     except Exception as e:
-        print(f"⚠️ yt-dlp hatası: {e}")
+        print(f"⚠️ yt-dlp exception: {e}")
     
-    # Son çare: Basit mesaj
-    return f"Bu video için transcript alınamadı. Video ID: {video_id}. Lütfen altyazılı bir video deneyin."
+    return None
+
+def get_video_description(video_id):
+    """Video açıklamasını al ve özetle"""
+    try:
+        # YouTube oEmbed'den başlık al
+        url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            title = data.get('title', '')
+            author = data.get('author_name', '')
+            
+            # Basit bir içerik oluştur
+            content = f"""
+Video Başlığı: {title}
+Kanal: {author}
+Video ID: {video_id}
+
+Bu video için otomatik transcript alınamadı. 
+Video başlığından hareketle genel bir analiz yapılacak.
+            """
+            
+            return content.strip()
+    
+    except Exception as e:
+        print(f"Video description hatası: {e}")
+    
+    return f"Video ID {video_id} için herhangi bir içerik alınamadı."
 
 def parse_vtt(vtt_content):
     """VTT dosyasını parse et"""
