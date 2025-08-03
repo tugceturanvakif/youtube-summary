@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "api/summarize.py": {
+      "runtime": "python3.9"
+    }
+  },
+  "env": {
+    "OPENAI_API_KEY": "@openai_api_key"
+  }
+}
+
